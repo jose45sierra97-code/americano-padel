@@ -56,6 +56,7 @@ export default function App() {
   const [seleccion, setSeleccion] = useState([]);
   const [creandoFecha, setCreandoFecha] = useState(false);
   const [editandoCruces, setEditandoCruces] = useState(false);
+  const [editandoParticipantes, setEditandoParticipantes] = useState(false);
   const [formTorneo, setFormTorneo] = useState(null);
   const [aviso, setAviso] = useState("");
   const [pend, setPend] = useState(null);
@@ -206,6 +207,12 @@ export default function App() {
   const borrarFecha = (fecha) => {
     setFechaAbierta(null);
     db(() => supabase.from("fechas").delete().eq("id", fecha.id));
+  };
+  const cambiarParticipante = (fecha, posicion, nuevoId) => {
+    const player_ids = [...fecha.player_ids];
+    player_ids[posicion] = nuevoId;
+    setFechas(fechas.map((f) => f.id === fecha.id ? { ...f, player_ids } : f));
+    db(() => supabase.from("fechas").update({ player_ids }).eq("id", fecha.id));
   };
 
   // ---------- Tabla general ----------
@@ -408,11 +415,17 @@ export default function App() {
             return (
               <section>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-                  <button onClick={() => { setFechaAbierta(null); setEditandoCruces(false); }} style={css.btnSecundario}>← Fechas</button>
+                  <button onClick={() => { setFechaAbierta(null); setEditandoCruces(false); setEditandoParticipantes(false); }} style={css.btnSecundario}>← Fechas</button>
                   <h2 style={{ margin: 0, fontSize: 20, letterSpacing: 1 }}>{fecha.name}</h2>
                   <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {!fecha.closed && (
-                      <button onClick={() => setEditandoCruces(!editandoCruces)} style={{ ...css.btnSecundario, ...(editandoCruces ? { borderColor: "#D8F542", color: "#D8F542" } : {}) }}>
+                      <button onClick={() => { setEditandoParticipantes(!editandoParticipantes); setEditandoCruces(false); }}
+                        style={{ ...css.btnSecundario, ...(editandoParticipantes ? { borderColor: "#D8F542", color: "#D8F542" } : {}) }}>
+                        {editandoParticipantes ? "Listo, guardar jugadores" : "Editar jugadores"}
+                      </button>
+                    )}
+                    {!fecha.closed && (
+                      <button onClick={() => { setEditandoCruces(!editandoCruces); setEditandoParticipantes(false); }} style={{ ...css.btnSecundario, ...(editandoCruces ? { borderColor: "#D8F542", color: "#D8F542" } : {}) }}>
                         {editandoCruces ? "Listo, guardar cruces" : "Editar cruces"}
                       </button>
                     )}
@@ -434,6 +447,32 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                {editandoParticipantes && (() => {
+                  const hayRepetido = fecha.player_ids.some((id, i) => fecha.player_ids.indexOf(id) !== i);
+                  const disponibles = misJugadores.filter((p) => !fecha.player_ids.includes(p.id));
+                  return (
+                    <div style={{ ...css.card, marginBottom: 14 }}>
+                      <div style={css.rondaTitulo}>JUGADORES DE ESTA FECHA (8)</div>
+                      <p style={{ color: "#8FA3B0", fontSize: 13, margin: "0 0 12px" }}>
+                        Cambiá cualquiera por otro del campeonato. Los resultados ya cargados se mantienen en su lugar; el jugador nuevo hereda la posición del que sale.
+                      </p>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+                        {fecha.player_ids.map((id, pos) => (
+                          <div key={pos} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={css.numChip}>{pos + 1}</span>
+                            <select value={id} onChange={(e) => cambiarParticipante(fecha, pos, e.target.value)}
+                              style={{ ...css.select, flex: 1 }}>
+                              <option value={id}>{nameOf(id)}</option>
+                              {disponibles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                      {hayRepetido && <p style={{ color: "#E85D5D", fontSize: 13, margin: "12px 0 0" }}>⚠ Hay un jugador repetido en la fecha. Cambiá uno de los dos.</p>}
+                    </div>
+                  );
+                })()}
 
                 <div style={css.layoutFecha}>
                   <div style={{ display: "grid", gap: 10 }}>
