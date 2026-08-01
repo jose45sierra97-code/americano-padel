@@ -3,13 +3,13 @@ import { supabase, configOk } from "./supabase.js";
 
 // ---------- Rotación americano 8 jugadores (índices 0-7) ----------
 const ROTACION = [
-  [[[0,7],[3,4]], [[1,6],[2,5]]],
-  [[[1,7],[4,5]], [[2,0],[3,6]]],
-  [[[2,7],[5,6]], [[3,1],[4,0]]],
-  [[[3,7],[6,0]], [[4,2],[5,1]]],
-  [[[4,7],[0,1]], [[5,3],[6,2]]],
-  [[[5,7],[1,2]], [[6,4],[0,3]]],
-  [[[6,7],[2,3]], [[0,5],[1,4]]],
+  [[[7,6],[5,2]], [[1,0],[3,4]]],
+  [[[3,6],[7,4]], [[2,1],[5,0]]],
+  [[[7,2],[4,1]], [[3,0],[6,5]]],
+  [[[4,6],[1,5]], [[0,2],[3,7]]],
+  [[[0,4],[2,6]], [[5,7],[1,3]]],
+  [[[2,3],[6,1]], [[4,5],[7,0]]],
+  [[[3,5],[4,2]], [[1,7],[0,6]]],
 ];
 const BONUS = [5, 3, 2];
 
@@ -17,6 +17,8 @@ const BONUS = [5, 3, 2];
 function statsDeFecha(fecha) {
   const results = fecha.results || {};
   const stats = {};
+  // subs: { "ronda-cancha": [posiciones 0..3 que fueron cubiertas por un suplente de afuera] }
+  const subs = fecha.subs || {};
   fecha.player_ids.forEach((id) => (stats[id] = { pj: 0, pg: 0, pts: 0, gf: 0, gc: 0 }));
   (fecha.rotacion || ROTACION).forEach((ronda, r) => {
     ronda.forEach((match, c) => {
@@ -24,10 +26,12 @@ function statsDeFecha(fecha) {
       if (!res || res.a === "" || res.b === "" || res.a === res.b) return;
       const ga = Number(res.a), gb = Number(res.b);
       const [pa, pb] = match;
-      const idsA = pa.map((i) => fecha.player_ids[i]);
-      const idsB = pb.map((i) => fecha.player_ids[i]);
-      idsA.forEach((id) => { stats[id].pj++; stats[id].gf += ga; stats[id].gc += gb; if (ga > gb) { stats[id].pg++; stats[id].pts += 3; } });
-      idsB.forEach((id) => { stats[id].pj++; stats[id].gf += gb; stats[id].gc += ga; if (gb > ga) { stats[id].pg++; stats[id].pts += 3; } });
+      const supMatch = subs[`${r}-${c}`] || [];
+      // posLocal: 0,1 = pareja A (índices globales 0,1) ; 2,3 = pareja B
+      const idsA = pa.map((i, k) => (supMatch.includes(k) ? null : fecha.player_ids[i]));
+      const idsB = pb.map((i, k) => (supMatch.includes(k + 2) ? null : fecha.player_ids[i]));
+      idsA.forEach((id) => { if (!id) return; stats[id].pj++; stats[id].gf += ga; stats[id].gc += gb; if (ga > gb) { stats[id].pg++; stats[id].pts += 3; } });
+      idsB.forEach((id) => { if (!id) return; stats[id].pj++; stats[id].gf += gb; stats[id].gc += ga; if (gb > ga) { stats[id].pg++; stats[id].pts += 3; } });
     });
   });
   return stats;
@@ -57,6 +61,7 @@ export default function App() {
   const [creandoFecha, setCreandoFecha] = useState(false);
   const [editandoCruces, setEditandoCruces] = useState(false);
   const [editandoParticipantes, setEditandoParticipantes] = useState(false);
+  const [marcandoSuplentes, setMarcandoSuplentes] = useState(false);
   const [formTorneo, setFormTorneo] = useState(null);
   const [aviso, setAviso] = useState("");
   const [pend, setPend] = useState(null);
@@ -192,6 +197,14 @@ export default function App() {
   };
   const restaurarRotacion = (fecha) => {
     db(() => supabase.from("fechas").update({ rotacion: null }).eq("id", fecha.id));
+  };
+  const toggleSuplente = (fecha, key, posLocal) => {
+    const subs = JSON.parse(JSON.stringify(fecha.subs || {}));
+    const actual = subs[key] || [];
+    subs[key] = actual.includes(posLocal) ? actual.filter((x) => x !== posLocal) : [...actual, posLocal];
+    if (subs[key].length === 0) delete subs[key];
+    setFechas(fechas.map((f) => f.id === fecha.id ? { ...f, subs } : f));
+    db(() => supabase.from("fechas").update({ subs }).eq("id", fecha.id));
   };
 
   const cerrarFecha = (fecha) => {
@@ -415,7 +428,7 @@ export default function App() {
             return (
               <section>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-                  <button onClick={() => { setFechaAbierta(null); setEditandoCruces(false); setEditandoParticipantes(false); }} style={css.btnSecundario}>← Fechas</button>
+                  <button onClick={() => { setFechaAbierta(null); setEditandoCruces(false); setEditandoParticipantes(false); setMarcandoSuplentes(false); }} style={css.btnSecundario}>← Fechas</button>
                   <h2 style={{ margin: 0, fontSize: 20, letterSpacing: 1 }}>{fecha.name}</h2>
                   <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {!fecha.closed && (
@@ -433,6 +446,12 @@ export default function App() {
                       <button onClick={() => pedirConfirm("restRot", () => restaurarRotacion(fecha))}
                         style={{ ...css.btnSecundario, ...(pend === "restRot" ? { borderColor: "#E8B85D", color: "#E8B85D" } : {}) }}>
                         {pend === "restRot" ? "¿Seguro? Tocá de nuevo" : "Restaurar original"}
+                      </button>
+                    )}
+                    {!fecha.closed && (
+                      <button onClick={() => { setMarcandoSuplentes(!marcandoSuplentes); setEditandoCruces(false); setEditandoParticipantes(false); }}
+                        style={{ ...css.btnSecundario, ...(marcandoSuplentes ? { borderColor: "#D8F542", color: "#D8F542" } : {}) }}>
+                        {marcandoSuplentes ? "Listo, guardar suplentes" : "Marcar suplentes"}
                       </button>
                     )}
                     {!fecha.closed
@@ -476,6 +495,11 @@ export default function App() {
 
                 <div style={css.layoutFecha}>
                   <div style={{ display: "grid", gap: 10 }}>
+                    {marcandoSuplentes && (
+                      <div style={css.aviso}>
+                        Tocá el jugador que <b>no jugó</b> ese partido (lo cubrió alguien de afuera). Queda tachado y no suma puntos; su compañero sí. Tocalo de nuevo para desmarcar.
+                      </div>
+                    )}
                     {rot.map((ronda, r) => (
                       <div key={r} style={css.card}>
                         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -502,11 +526,34 @@ export default function App() {
                               {selJugador(1, 0)}{selJugador(1, 1)}
                             </div>
                           );
+                          if (marcandoSuplentes) {
+                            const supMatch = fecha.subs?.[key] || [];
+                            const jugadorBtn = (posLocal, gi) => {
+                              const esSup = supMatch.includes(posLocal);
+                              return (
+                                <button onClick={() => toggleSuplente(fecha, key, posLocal)}
+                                  style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, padding: "2px 4px",
+                                    color: esSup ? "#E85D5D" : "#E8EEF2", textDecoration: esSup ? "line-through" : "none" }}>
+                                  {nameOf(fecha.player_ids[gi])}{esSup ? " (suplente)" : ""}
+                                </button>
+                              );
+                            };
+                            return (
+                              <div key={c} style={css.partido}>
+                                <span style={css.cancha}>C{c + 1}</span>
+                                <span style={{ textAlign: "right" }}>{jugadorBtn(0, pa[0])} / {jugadorBtn(1, pa[1])}</span>
+                                <span style={{ gridColumn: "3 / 6", textAlign: "center", color: "#5A6E7C", fontSize: 11 }}>tocá al que faltó</span>
+                                <span>{jugadorBtn(2, pb[0])} / {jugadorBtn(3, pb[1])}</span>
+                              </div>
+                            );
+                          }
+                          const supMatch = fecha.subs?.[key] || [];
+                          const nombreConSup = (posLocal, gi) => nameOf(fecha.player_ids[gi]) + (supMatch.includes(posLocal) ? " (sup)" : "");
                           return (
                             <div key={c} style={css.partido}>
                               <span style={css.cancha}>C{c + 1}</span>
                               <span style={{ ...css.pareja, textAlign: "right", color: Number(res.a) > Number(res.b) && res.b !== "" ? "#D8F542" : "#E8EEF2" }}>
-                                {pa.map((i) => nameOf(fecha.player_ids[i])).join(" / ")}
+                                {nombreConSup(0, pa[0])} / {nombreConSup(1, pa[1])}
                               </span>
                               <input type="number" min="0" max="12" value={res.a} disabled={fecha.closed}
                                 onChange={(e) => setResultado(fecha, key, "a", e.target.value)}
@@ -516,7 +563,7 @@ export default function App() {
                                 onChange={(e) => setResultado(fecha, key, "b", e.target.value)}
                                 style={{ ...css.score, borderColor: empate ? "#E85D5D" : "#22303B" }} aria-label="Games pareja 2" />
                               <span style={{ ...css.pareja, color: Number(res.b) > Number(res.a) && res.a !== "" ? "#D8F542" : "#E8EEF2" }}>
-                                {pb.map((i) => nameOf(fecha.player_ids[i])).join(" / ")}
+                                {nombreConSup(2, pb[0])} / {nombreConSup(3, pb[1])}
                               </span>
                             </div>
                           );
